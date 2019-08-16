@@ -6,13 +6,15 @@
 //  Copyright © 2015 Roy Marmelstein. All rights reserved.
 //
 
+
 import Foundation
 
 final class RegexManager {
 
     // MARK: Regular expression pool
-
     var regularExpresionPool = [String: NSRegularExpression]()
+
+    private let regularExpressionPoolQueue = DispatchQueue(label: "com.phonenumberkit.regexpool", attributes: .concurrent)
 
     var spaceCharacterSet: CharacterSet = {
         let characterSet = NSMutableCharacterSet(charactersIn: "\u{00a0}")
@@ -20,24 +22,28 @@ final class RegexManager {
         return characterSet as CharacterSet
     }()
 
-    deinit {
-        regularExpresionPool.removeAll()
-    }
-
     // MARK: Regular expression
-
     func regexWithPattern(_ pattern: String) throws -> NSRegularExpression {
-        if let regex = regularExpresionPool[pattern] {
-            return regex
-        } else {
-            do {
-                let regularExpression: NSRegularExpression
-                regularExpression =  try NSRegularExpression(pattern: pattern, options:NSRegularExpression.Options.caseInsensitive)
-                regularExpresionPool[pattern] = regularExpression
-                return regularExpression
-            } catch {
-                throw PhoneNumberError.generalError
+        var cached: NSRegularExpression?
+
+        regularExpressionPoolQueue.sync {
+            cached = self.regularExpresionPool[pattern]
+        }
+
+        if let cached = cached {
+            return cached
+        }
+
+        do {
+            let regex = try NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+
+            regularExpressionPoolQueue.async(flags: .barrier) {
+                self.regularExpresionPool[pattern] = regex
             }
+
+            return regex
+        } catch {
+            throw PhoneNumberError.generalError
         }
     }
 
@@ -62,7 +68,6 @@ final class RegexManager {
     }
 
     // MARK: Match helpers
-
     func matchesAtStart(_ pattern: String, string: String) -> Bool {
         do {
             let matches = try regexMatches(pattern, string: string)
@@ -123,7 +128,6 @@ final class RegexManager {
     }
 
     // MARK: String and replace
-
     func replaceStringByRegex(_ pattern: String, string: String) -> String {
         do {
             var replacementResult = string
@@ -190,7 +194,6 @@ final class RegexManager {
     }
 
     // MARK: Validations
-
     func hasValue(_ value: String?) -> Bool {
         if let valueString = value {
             if valueString.trimmingCharacters(in: spaceCharacterSet).count == 0 {
@@ -213,7 +216,6 @@ final class RegexManager {
 }
 
 // MARK: Extensions
-
 extension String {
     func substring(with range: NSRange) -> String {
         let nsString = self as NSString
